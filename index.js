@@ -1,9 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 import { listLocalBooks, openLocalBook } from './lib/library.js';
 import * as source from './lib/source.js';
 import { openOnlineBook } from './lib/onlineBook.js';
 import { openReader } from './lib/reader.js';
-import { getProgress } from './lib/progress.js';
+import { getProgress, listRecentBooks } from './lib/progress.js';
+import { BOOKS_DIR } from './lib/paths.js';
 
 function ask(rl, question) {
   return new Promise((resolve) => rl.question(question, resolve));
@@ -22,6 +25,44 @@ async function localMenu(rl) {
   const book = openLocalBook(books[idx]);
   const progress = getProgress(book.id);
   await openReader(book, progress);
+}
+
+async function continueMenu(rl) {
+  const recent = listRecentBooks();
+  if (recent.length === 0) {
+    console.log('还没有读过的书，先去本地书架或者在线搜索找一本吧。');
+    return;
+  }
+  recent.forEach((b, i) => {
+    const tag = b.id.startsWith('online:') ? '[在线]' : b.id.startsWith('local:') ? '[本地]' : '';
+    console.log(`${i + 1}. ${tag} ${b.title}`);
+  });
+  const choice = (await ask(rl, '选书 (回车返回): ')).trim();
+  const idx = Number(choice) - 1;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= recent.length) return;
+  const entry = recent[idx];
+  const progress = getProgress(entry.id);
+  try {
+    if (entry.id.startsWith('online:')) {
+      const siteId = entry.id.slice('online:'.length);
+      console.log('正在加载...');
+      const book = await openOnlineBook(siteId, progress?.key);
+      await openReader({ ...book, id: entry.id }, progress);
+    } else if (entry.id.startsWith('local:')) {
+      const fileName = entry.id.slice('local:'.length);
+      const filePath = path.join(BOOKS_DIR, fileName);
+      if (!fs.existsSync(filePath)) {
+        console.log('本地文件已经不见了: ' + fileName);
+        return;
+      }
+      const book = openLocalBook({ id: entry.id, title: entry.title, filePath });
+      await openReader(book, progress);
+    } else {
+      console.log('这条记录认不出是本地书还是在线书，跳过。');
+    }
+  } catch (err) {
+    console.log('打开失败: ' + err.message);
+  }
 }
 
 async function pickAndOpenOnline(rl, list) {
@@ -73,15 +114,17 @@ async function mainMenu() {
   let running = true;
   while (running) {
     console.log('\n$ node index.js');
-    console.log('[1] 本地书架');
-    console.log('[2] 在线搜索');
-    console.log('[3] 热门推荐');
-    console.log('[4] 退出');
+    console.log('[1] 继续阅读');
+    console.log('[2] 本地书架');
+    console.log('[3] 在线搜索');
+    console.log('[4] 热门推荐');
+    console.log('[5] 退出');
     const choice = (await ask(rl, '> ')).trim();
-    if (choice === '1') await localMenu(rl);
-    else if (choice === '2') await onlineSearchMenu(rl);
-    else if (choice === '3') await discoverMenu(rl);
-    else if (choice === '4' || choice.toLowerCase() === 'q') running = false;
+    if (choice === '1') await continueMenu(rl);
+    else if (choice === '2') await localMenu(rl);
+    else if (choice === '3') await onlineSearchMenu(rl);
+    else if (choice === '4') await discoverMenu(rl);
+    else if (choice === '5' || choice.toLowerCase() === 'q') running = false;
   }
   rl.close();
 }
