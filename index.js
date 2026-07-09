@@ -1,25 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 import { listLocalBooks, openLocalBook } from './lib/library.js';
 import * as source from './lib/source.js';
 import { openOnlineBook } from './lib/onlineBook.js';
 import { openReader } from './lib/reader.js';
-import { getProgress, listRecentBooks } from './lib/progress.js';
+import { getProgress, listRecentBooks, removeProgress } from './lib/progress.js';
 import { BOOKS_DIR } from './lib/paths.js';
+import { ask } from './lib/panicInput.js';
 
-function ask(rl, question) {
-  return new Promise((resolve) => rl.question(question, resolve));
-}
-
-async function localMenu(rl) {
+async function localMenu() {
   const books = listLocalBooks();
   if (books.length === 0) {
     console.log('books/ 目录里还没有 txt 文件，把小说放进去再回来吧。');
     return;
   }
   books.forEach((b, i) => console.log(`${i + 1}. ${b.title}`));
-  const choice = (await ask(rl, '选书 (回车返回): ')).trim();
+  const choice = (await ask('选书 (回车返回): ')).trim();
   const idx = Number(choice) - 1;
   if (!Number.isInteger(idx) || idx < 0 || idx >= books.length) return;
   const book = openLocalBook(books[idx]);
@@ -27,7 +23,7 @@ async function localMenu(rl) {
   await openReader(book, progress);
 }
 
-async function continueMenu(rl) {
+async function continueMenu() {
   const recent = listRecentBooks();
   if (recent.length === 0) {
     console.log('还没有读过的书，先去本地书架或者在线搜索找一本吧。');
@@ -37,7 +33,7 @@ async function continueMenu(rl) {
     const tag = b.id.startsWith('online:') ? '[在线]' : b.id.startsWith('local:') ? '[本地]' : '';
     console.log(`${i + 1}. ${tag} ${b.title}`);
   });
-  const choice = (await ask(rl, '选书 (回车返回): ')).trim();
+  const choice = (await ask('选书 (回车返回): ')).trim();
   const idx = Number(choice) - 1;
   if (!Number.isInteger(idx) || idx < 0 || idx >= recent.length) return;
   const entry = recent[idx];
@@ -52,7 +48,13 @@ async function continueMenu(rl) {
       const fileName = entry.id.slice('local:'.length);
       const filePath = path.join(BOOKS_DIR, fileName);
       if (!fs.existsSync(filePath)) {
-        console.log('本地文件已经不见了: ' + fileName);
+        const del = (await ask(`本地文件已经不见了: ${fileName}，要把这条记录删掉吗？(y/n): `))
+          .trim()
+          .toLowerCase();
+        if (del === 'y') {
+          removeProgress(entry.id);
+          console.log('已删除。');
+        }
         return;
       }
       const book = openLocalBook({ id: entry.id, title: entry.title, filePath });
@@ -65,7 +67,7 @@ async function continueMenu(rl) {
   }
 }
 
-async function pickAndOpenOnline(rl, list) {
+async function pickAndOpenOnline(list) {
   if (list.length === 0) {
     console.log('没有找到结果。');
     return;
@@ -74,7 +76,7 @@ async function pickAndOpenOnline(rl, list) {
     const intro = b.intro ? '  ' + b.intro.slice(0, 40) : '';
     console.log(`${i + 1}. ${b.title}${intro}`);
   });
-  const choice = (await ask(rl, '选书 (回车返回): ')).trim();
+  const choice = (await ask('选书 (回车返回): ')).trim();
   const idx = Number(choice) - 1;
   if (!Number.isInteger(idx) || idx < 0 || idx >= list.length) return;
   console.log('正在加载...');
@@ -89,28 +91,27 @@ async function pickAndOpenOnline(rl, list) {
   }
 }
 
-async function onlineSearchMenu(rl) {
-  const keyword = (await ask(rl, '输入书名/作者关键字: ')).trim();
+async function onlineSearchMenu() {
+  const keyword = (await ask('输入书名/作者关键字: ')).trim();
   if (!keyword) return;
   try {
     const results = await source.search(keyword);
-    await pickAndOpenOnline(rl, results);
+    await pickAndOpenOnline(results);
   } catch (err) {
     console.log('搜索失败: ' + err.message);
   }
 }
 
-async function discoverMenu(rl) {
+async function discoverMenu() {
   try {
     const results = await source.discover();
-    await pickAndOpenOnline(rl, results);
+    await pickAndOpenOnline(results);
   } catch (err) {
     console.log('获取推荐失败: ' + err.message);
   }
 }
 
 async function mainMenu() {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let running = true;
   while (running) {
     console.log('\n$ node index.js');
@@ -119,14 +120,13 @@ async function mainMenu() {
     console.log('[3] 在线搜索');
     console.log('[4] 热门推荐');
     console.log('[5] 退出');
-    const choice = (await ask(rl, '> ')).trim();
-    if (choice === '1') await continueMenu(rl);
-    else if (choice === '2') await localMenu(rl);
-    else if (choice === '3') await onlineSearchMenu(rl);
-    else if (choice === '4') await discoverMenu(rl);
+    const choice = (await ask('> ')).trim();
+    if (choice === '1') await continueMenu();
+    else if (choice === '2') await localMenu();
+    else if (choice === '3') await onlineSearchMenu();
+    else if (choice === '4') await discoverMenu();
     else if (choice === '5' || choice.toLowerCase() === 'q') running = false;
   }
-  rl.close();
 }
 
 mainMenu();
