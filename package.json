@@ -1,0 +1,14 @@
+{
+  "name": "novel-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "终端摸鱼小说阅读器",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js"
+  }
+}

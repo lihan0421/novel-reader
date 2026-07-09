@@ -1,0 +1,4 @@
+data/
+books/*.txt
+!books/README.md
+node_modules/
