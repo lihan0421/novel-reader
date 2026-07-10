@@ -4,9 +4,10 @@ import { listLocalBooks, openLocalBook } from './lib/library.js';
 import * as source from './lib/source.js';
 import { openOnlineBook } from './lib/onlineBook.js';
 import { openReader } from './lib/reader.js';
-import { getProgress, listRecentBooks, removeProgress } from './lib/progress.js';
+import { getProgress, listRecentBooks, removeProgress, saveProgress } from './lib/progress.js';
 import { BOOKS_DIR } from './lib/paths.js';
 import { ask } from './lib/panicInput.js';
+import { downloadOnlineBook } from './lib/downloadBook.js';
 
 async function localMenu() {
   const books = listLocalBooks();
@@ -23,6 +24,32 @@ async function localMenu() {
   await openReader(book, progress);
 }
 
+async function downloadAndSwitchToLocal(entry) {
+  const siteId = entry.id.slice('online:'.length);
+  const progress = getProgress(entry.id);
+  console.log(`开始下载《${entry.title}》，章节多的话要好几分钟，边下边存盘，中途 Ctrl+C 也不会白抓。`);
+  try {
+    const result = await downloadOnlineBook(siteId, {
+      currentKey: progress?.key,
+      currentLineOffset: progress?.lineOffset ?? 0,
+      onProgress: (n, label) => {
+        process.stdout.write(`\r已下载 ${n} 章：${(label || '').slice(0, 20)}`.padEnd(50));
+      },
+    });
+    console.log('');
+    console.log(`下载完成，共 ${result.chapterCount} 章，已保存到 books/${result.fileName}`);
+    saveProgress('local:' + result.fileName, {
+      key: 'local',
+      lineOffset: result.lineOffset,
+      title: result.title,
+    });
+    console.log('阅读进度已经换算好了，去"继续阅读"或者"本地书架"里选它就能接着看（原来那条在线记录还留着，不会动）。');
+  } catch (err) {
+    console.log('');
+    console.log('下载失败: ' + err.message);
+  }
+}
+
 async function continueMenu() {
   const recent = listRecentBooks();
   if (recent.length === 0) {
@@ -33,10 +60,22 @@ async function continueMenu() {
     const tag = b.id.startsWith('online:') ? '[在线]' : b.id.startsWith('local:') ? '[本地]' : '';
     console.log(`${i + 1}. ${tag} ${b.title}`);
   });
-  const choice = (await ask('选书 (回车返回): ')).trim();
+  const raw = (
+    await ask('选书；在线书想整本下载到本地就输入 d+序号，比如 d2 (回车返回): ')
+  ).trim();
+  const downloadMode = /^d\d+$/i.test(raw);
+  const choice = downloadMode ? raw.slice(1) : raw;
   const idx = Number(choice) - 1;
   if (!Number.isInteger(idx) || idx < 0 || idx >= recent.length) return;
   const entry = recent[idx];
+  if (downloadMode) {
+    if (!entry.id.startsWith('online:')) {
+      console.log('本地书本来就在本地，不用下载。');
+      return;
+    }
+    await downloadAndSwitchToLocal(entry);
+    return;
+  }
   const progress = getProgress(entry.id);
   try {
     if (entry.id.startsWith('online:')) {
